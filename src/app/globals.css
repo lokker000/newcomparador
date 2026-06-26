@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+/* Modo oscuro por clase: se activa agregando .dark en <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light dark;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+}
+
+/* ── Impresión / exportar a PDF ─────────────────────────────────
+   Solo se imprime el informe. Todo lo marcado .no-print se oculta. */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .print-area {
+    box-shadow: none !important;
+    border: none !important;
+  }
+  @page {
+    margin: 1.5cm;
+  }
+}
