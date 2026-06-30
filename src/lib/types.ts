@@ -22,6 +22,14 @@ export type DocType =
 export interface FieldValue {
   value: string | null;
   legible: boolean;
+  /**
+   * Caja de origen (best-effort) que devuelve Gemini para el documento
+   * "avaluo": [ymin, xmin, ymax, xmax] normalizada a 0..1000 sobre la imagen
+   * de la página. Opcional: el resto de documentos no la incluye.
+   */
+  box?: [number, number, number, number];
+  /** Página (1-based) del PDF donde aparece el valor. Imágenes: 1/omitida. */
+  page?: number;
 }
 
 export type ExtractedFields = Record<string, FieldValue>;

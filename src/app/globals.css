@@ -3,16 +3,118 @@
 /* Modo oscuro por clase: se activa agregando .dark en <html>. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ── Sistema de diseño (tokens) ─────────────────────────────────
+   Paleta neutra cálida + un único acento verde (institucional, SAG).
+   Sin gradientes ni colores estridentes: look corporativo y sobrio. */
 :root {
-  color-scheme: light dark;
+  --background: oklch(0.992 0.002 100);
+  --foreground: oklch(0.205 0.01 120);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.205 0.01 120);
+
+  --muted: oklch(0.968 0.003 110);
+  --muted-foreground: oklch(0.5 0.012 120);
+
+  --border: oklch(0.912 0.004 110);
+  --border-strong: oklch(0.86 0.005 110);
+
+  --primary: oklch(0.5 0.1 158);
+  --primary-foreground: oklch(0.99 0.01 150);
+  --primary-soft: oklch(0.95 0.03 158);
+
+  --ring: oklch(0.5 0.1 158);
+
+  --ok: oklch(0.52 0.11 158);
+  --ok-soft: oklch(0.95 0.035 158);
+  --warn: oklch(0.62 0.13 70);
+  --warn-soft: oklch(0.96 0.05 85);
+  --danger: oklch(0.56 0.18 25);
+  --danger-soft: oklch(0.96 0.04 25);
+
+  --radius: 0.625rem;
 }
 
-html {
-  -webkit-text-size-adjust: 100%;
+.dark {
+  --background: oklch(0.165 0.006 130);
+  --foreground: oklch(0.955 0.003 110);
+
+  --card: oklch(0.205 0.007 135);
+  --card-foreground: oklch(0.955 0.003 110);
+
+  --muted: oklch(0.255 0.008 135);
+  --muted-foreground: oklch(0.7 0.012 115);
+
+  --border: oklch(0.29 0.008 135);
+  --border-strong: oklch(0.36 0.009 135);
+
+  --primary: oklch(0.66 0.12 158);
+  --primary-foreground: oklch(0.16 0.02 150);
+  --primary-soft: oklch(0.28 0.04 158);
+
+  --ring: oklch(0.66 0.12 158);
+
+  --ok: oklch(0.7 0.12 158);
+  --ok-soft: oklch(0.27 0.04 158);
+  --warn: oklch(0.78 0.13 78);
+  --warn-soft: oklch(0.3 0.05 80);
+  --danger: oklch(0.68 0.16 25);
+  --danger-soft: oklch(0.3 0.06 25);
 }
 
-body {
-  @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-ring: var(--ring);
+
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: var(--primary-soft);
+  }
+}
+
+/* Números tabulares para datos (RUT, rol, superficie). */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
 }
 
 /* ── Impresión / exportar a PDF ─────────────────────────────────
@@ -30,6 +132,6 @@ body {
     border: none !important;
   }
   @page {
-    margin: 1.5cm;
+    margin: 1.6cm;
   }
 }

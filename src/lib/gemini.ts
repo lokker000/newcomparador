@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { DocType, ExtractedDocument, ExtractedFields } from "./types";
+import type { DocType, ExtractedDocument, ExtractedFields, FieldValue } from "./types";
 import { DOC_SPECS, buildPrompt, buildResponseSchema } from "./extraction/schemas";
 
 // ───────────────────────────────────────────────────────────────
@@ -40,14 +40,88 @@ export function getModel(): string {
   return process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
 }
 
-function getApiKey(): string {
-  const key = process.env.GEMINI_API_KEY?.trim();
-  if (!key) {
+/**
+ * Lista de credenciales. Acepta varias separadas por coma en GEMINI_API_KEYS
+ * (o GEMINI_API_KEY). Ante un 429 (cuota agotada) se rota a la siguiente.
+ */
+function getApiKeys(): string[] {
+  const raw = (process.env.GEMINI_API_KEYS || process.env.GEMINI_API_KEY || "").trim();
+  const keys = raw.split(",").map((k) => k.trim()).filter(Boolean);
+  if (keys.length === 0) {
     throw new Error(
       "Falta GEMINI_API_KEY. Copia .env.example a .env.local y agrega tu key.",
     );
   }
-  return key;
+  return keys;
+}
+
+const MAX_ATTEMPTS = 4;
+const BASE_DELAY_MS = 500;
+const MAX_DELAY_MS = 8_000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Backoff exponencial con jitter, topado a MAX_DELAY_MS. */
+function backoff(attempt: number): number {
+  const exp = Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS);
+  return exp / 2 + Math.random() * (exp / 2); // jitter
+}
+
+/** Parsea Retry-After (segundos) a ms, topado. null si no aplica. */
+function parseRetryAfter(h: string | null): number | null {
+  if (!h) return null;
+  const secs = Number(h);
+  if (!Number.isFinite(secs) || secs < 0) return null;
+  return Math.min(secs * 1000, MAX_DELAY_MS);
+}
+
+type GeminiResult =
+  | { ok: true; res: Response }
+  | { ok: false; status: number; detail: string };
+
+/**
+ * POST a Gemini con reintentos. Reintenta en 429/503/5xx y errores de red,
+ * con backoff exponencial (respetando Retry-After si viene). En 429 rota a la
+ * siguiente API key. Errores 4xx no reintentables se devuelven de inmediato.
+ */
+async function postToGemini(model: string, bodyStr: string): Promise<GeminiResult> {
+  const keys = getApiKeys();
+  let keyIdx = 0;
+  let lastStatus = 0;
+  let lastDetail = "";
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const { url, headers } = buildRequest(keys[keyIdx % keys.length], model);
+
+    let res: Response;
+    try {
+      res = await fetch(url, { method: "POST", headers, body: bodyStr });
+    } catch (e) {
+      // Error de red: reintentable. El mensaje puede traer la URL (con ?key=),
+      // así que solo va al log del servidor.
+      lastStatus = 0;
+      lastDetail = (e as Error).message;
+      console.error(`[extract] red, intento ${attempt + 1}/${MAX_ATTEMPTS}:`, lastDetail);
+      if (attempt < MAX_ATTEMPTS - 1) await sleep(backoff(attempt));
+      continue;
+    }
+
+    if (res.ok) return { ok: true, res };
+
+    lastStatus = res.status;
+    lastDetail = shorten(await res.text().catch(() => ""));
+
+    const retryable = res.status === 429 || res.status >= 500;
+    if (!retryable) return { ok: false, status: res.status, detail: lastDetail };
+
+    console.error(`[extract] Gemini ${res.status}, intento ${attempt + 1}/${MAX_ATTEMPTS}:`, lastDetail);
+    if (res.status === 429) keyIdx++; // cuota: prueba la siguiente key
+    if (attempt < MAX_ATTEMPTS - 1) {
+      await sleep(parseRetryAfter(res.headers.get("retry-after")) ?? backoff(attempt));
+    }
+  }
+
+  return { ok: false, status: lastStatus, detail: lastDetail };
 }
 
 /**
@@ -83,16 +157,13 @@ export async function extractDocument(input: ExtractInput): Promise<ExtractedDoc
     return empty(`Formato no soportado: ${input.mimeType}. Usa PDF, JPG, PNG o WEBP.`);
   }
 
-  let key: string;
   let model: string;
   try {
-    key = getApiKey();
     model = getModel();
+    getApiKeys(); // valida que haya al menos una key antes de armar el body
   } catch (e) {
     return empty((e as Error).message);
   }
-
-  const { url, headers } = buildRequest(key, model);
 
   const body = {
     system_instruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
@@ -112,21 +183,17 @@ export async function extractDocument(input: ExtractInput): Promise<ExtractedDoc
     },
   };
 
-  let res: Response;
-  try {
-    res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
-  } catch (e) {
-    return empty(`No se pudo contactar la IA: ${(e as Error).message}`);
-  }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    return empty(`La IA respondió ${res.status}: ${shorten(text)}`);
+  const result = await postToGemini(model, JSON.stringify(body));
+  if (!result.ok) {
+    // El detalle ya se logueó en postToGemini; al cliente solo mensaje genérico.
+    if (result.status === 0) return empty("No se pudo contactar la IA. Intenta de nuevo.");
+    if (result.status === 429) return empty("La IA está sin cuota disponible. Intenta más tarde.");
+    return empty(`La IA no pudo procesar el documento (error ${result.status}).`);
   }
 
   let json: unknown;
   try {
-    json = await res.json();
+    json = await result.res.json();
   } catch {
     return empty("La IA devolvió una respuesta no-JSON.");
   }
@@ -145,12 +212,61 @@ export async function extractDocument(input: ExtractInput): Promise<ExtractedDoc
 
   const fields: ExtractedFields = {};
   for (const f of spec.fields) {
-    const v = parsed[f.key];
-    const value = typeof v === "string" && v.trim() !== "" ? v.trim() : null;
-    fields[f.key] = { value, legible: value !== null };
+    fields[f.key] = spec.locate
+      ? parseLocatedField(parsed[f.key])
+      : parseFlatField(parsed[f.key]);
   }
 
   return { docType: input.docType, fileName: input.fileName, fields };
+}
+
+/** Documentos normales: el campo es un string plano (o null). */
+function parseFlatField(v: unknown): FieldValue {
+  const value = typeof v === "string" && v.trim() !== "" ? v.trim() : null;
+  return { value, legible: value !== null };
+}
+
+/**
+ * Documentos con `locate` (avaluo): el campo es {value, box_2d, page}.
+ * Valida la caja defensivamente; si está malformada se descarta (no se lanza).
+ */
+function parseLocatedField(v: unknown): FieldValue {
+  if (v === null || typeof v !== "object") return parseFlatField(v);
+  const obj = v as Record<string, unknown>;
+
+  const rawValue = obj.value;
+  const value =
+    typeof rawValue === "string" && rawValue.trim() !== "" ? rawValue.trim() : null;
+
+  const field: FieldValue = { value, legible: value !== null };
+
+  const box = parseBox(obj.box_2d);
+  if (box) field.box = box;
+
+  const page = parsePage(obj.page);
+  if (page !== undefined) field.page = page;
+
+  return field;
+}
+
+/** Acepta solo un array de 4 números finitos dentro de 0..1000. */
+function parseBox(raw: unknown): [number, number, number, number] | undefined {
+  if (!Array.isArray(raw) || raw.length !== 4) return undefined;
+  const nums: number[] = [];
+  for (const n of raw) {
+    if (typeof n !== "number" || !Number.isFinite(n) || n < 0 || n > 1000) {
+      return undefined;
+    }
+    nums.push(n);
+  }
+  return [nums[0], nums[1], nums[2], nums[3]];
+}
+
+/** Página 1-based como entero positivo, o undefined. */
+function parsePage(raw: unknown): number | undefined {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
+  const p = Math.round(raw);
+  return p >= 1 ? p : undefined;
 }
 
 function emptyFields(docType: DocType): ExtractedFields {

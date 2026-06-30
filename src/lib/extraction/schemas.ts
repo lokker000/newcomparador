@@ -18,13 +18,21 @@ export interface DocSpec {
   /** Contexto del documento para guiar a la IA. */
   description: string;
   fields: FieldSpec[];
+  /**
+   * Si es true, la IA además devuelve la ubicación (box_2d + page) de cada
+   * campo para mostrar el origen en el informe. Solo activado en "avaluo".
+   * Cuando es false/ausente, el esquema y prompt son los de siempre (string plano).
+   */
+  locate?: boolean;
 }
 
 export const DOC_SPECS: Record<DocType, DocSpec> = {
   formulario: {
     label: "Formulario de solicitud de certificación de subdivisión de predios rústicos",
     description:
-      "Formulario que llena el cliente (persona natural o sociedad). Es la verdad declarada que se verifica contra el resto.",
+      "Formulario que llena el cliente (persona natural o sociedad). Es la verdad declarada que se verifica contra el resto. " +
+      "IMPORTANTE: extrae información SOLO hasta la sección «5.- Lotes o parcelas y servidumbres de tránsito» inclusive. " +
+      "Ignora por completo cualquier sección o dato que aparezca DESPUÉS de ese punto.",
     fields: [
       { key: "tipo_solicitante", hint: "'natural' o 'sociedad' según quién solicita" },
       { key: "nombre_solicitante", hint: "Nombre completo del solicitante persona natural" },
@@ -42,6 +50,7 @@ export const DOC_SPECS: Record<DocType, DocSpec> = {
   avaluo: {
     label: "Certificado de avalúo fiscal detallado (SII)",
     description: "Documento oficial del SII con los datos tributarios del predio.",
+    locate: true,
     fields: [
       { key: "rol_predio", hint: "Rol de avalúo del predio (formato 'NNN-NN')" },
       { key: "propietario", hint: "Nombre del propietario según el SII" },
@@ -52,7 +61,7 @@ export const DOC_SPECS: Record<DocType, DocSpec> = {
     ],
   },
   cbr: {
-    label: "Inscripción de dominio — Conservador de Bienes Raíces",
+    label: "Dominio vigente — Conservador de Bienes Raíces",
     description:
       "Inscripción de dominio vigente. Acredita el propietario actual y la individualización del predio.",
     fields: [
@@ -75,14 +84,15 @@ export const DOC_SPECS: Record<DocType, DocSpec> = {
       { key: "apellidos", hint: "Apellidos del titular" },
       { key: "run", hint: "RUN del titular (con dígito verificador)" },
       { key: "fecha_nacimiento", hint: "Fecha de nacimiento" },
+      { key: "fecha_vencimiento", hint: "Fecha de vencimiento / validez de la cédula (en el frente)" },
     ],
   },
   cedula_reverso: {
     label: "Cédula de identidad chilena — lado posterior",
-    description: "Lado posterior de la cédula. Aquí está la fecha de vencimiento.",
+    description: "Lado posterior de la cédula.",
     fields: [
       { key: "run", hint: "RUN si aparece en el reverso" },
-      { key: "fecha_vencimiento", hint: "Fecha de vencimiento / validez de la cédula" },
+      { key: "fecha_vencimiento", hint: "Fecha de vencimiento solo si aparece aquí (formato antiguo)" },
       { key: "numero_documento", hint: "Número de documento de la cédula" },
     ],
   },
@@ -102,6 +112,30 @@ export const DOC_SPECS: Record<DocType, DocSpec> = {
 export function buildPrompt(docType: DocType): string {
   const spec = DOC_SPECS[docType];
   const lines = spec.fields.map((f) => `- ${f.key}: ${f.hint}`).join("\n");
+
+  if (spec.locate) {
+    return [
+      `Eres un extractor de datos. Documento: "${spec.label}".`,
+      spec.description,
+      "",
+      "Para CADA uno de los siguientes campos devuelve un objeto con tres claves:",
+      "  - value: el texto tal cual aparece (o null si no está / no es legible).",
+      "  - box_2d: la caja que rodea ese valor en la imagen de la página, como",
+      "    [ymin, xmin, ymax, xmax] con cada número normalizado de 0 a 1000",
+      "    (0 = borde superior/izquierdo, 1000 = borde inferior/derecho). null si value es null.",
+      "  - page: el número de página (1-based) donde aparece el valor. 1 si es una sola página.",
+      "",
+      "Campos:",
+      lines,
+      "",
+      "Reglas estrictas:",
+      "- Si un campo no aparece o no es legible: value=null y box_2d=null. NUNCA inventes ni adivines.",
+      "- Transcribe los valores tal cual aparecen (no corrijas ni normalices).",
+      "- box_2d debe encerrar SOLO el texto del valor, lo más ajustado posible.",
+      "- No agregues campos que no se pidieron.",
+    ].join("\n");
+  }
+
   return [
     `Eres un extractor de datos. Documento: "${spec.label}".`,
     spec.description,
@@ -121,11 +155,29 @@ export function buildResponseSchema(docType: DocType): Record<string, unknown> {
   const spec = DOC_SPECS[docType];
   const properties: Record<string, unknown> = {};
   for (const f of spec.fields) {
-    properties[f.key] = {
-      type: "STRING",
-      nullable: true,
-      description: f.hint,
-    };
+    if (spec.locate) {
+      // Cada campo es un objeto {value, box_2d, page}. box_2d = [ymin,xmin,ymax,xmax].
+      properties[f.key] = {
+        type: "OBJECT",
+        description: f.hint,
+        properties: {
+          value: { type: "STRING", nullable: true },
+          box_2d: {
+            type: "ARRAY",
+            nullable: true,
+            items: { type: "NUMBER", nullable: true },
+          },
+          page: { type: "NUMBER", nullable: true },
+        },
+        required: ["value", "box_2d", "page"],
+      };
+    } else {
+      properties[f.key] = {
+        type: "STRING",
+        nullable: true,
+        description: f.hint,
+      };
+    }
   }
   return {
     type: "OBJECT",

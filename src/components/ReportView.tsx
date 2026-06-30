@@ -1,112 +1,136 @@
 "use client";
 
-import type { ExtractedDocument, Report, RuleStatus } from "@/lib/types";
+import { useState, type ReactNode } from "react";
+import type { DocType, ExtractedDocument, Report, RuleStatus } from "@/lib/types";
 import { DOC_LABELS } from "@/lib/documents";
 import { DOC_SPECS } from "@/lib/extraction/schemas";
+import { Badge, Card, cn } from "./ui";
+import { Alert, Ban, Check, ChevronDown, Help, ShieldCheck, Target, X } from "./icons";
+import EvidenceViewer from "./EvidenceViewer";
+
+type Tone = "ok" | "warn" | "danger" | "neutral";
 
 const STATUS_META: Record<
   RuleStatus,
-  { icon: string; label: string; chip: string }
+  { icon: ReactNode; label: string; tone: Tone }
 > = {
-  ok: {
-    icon: "✅",
-    label: "Coincide",
-    chip: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
-  },
-  mismatch: {
-    icon: "❌",
-    label: "No coincide",
-    chip: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
-  },
-  warn: {
-    icon: "⚠️",
-    label: "Difiere",
-    chip: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
-  },
-  expired: {
-    icon: "⛔",
-    label: "Vencido",
-    chip: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
-  },
-  missing: {
-    icon: "❔",
-    label: "Falta / no legible",
-    chip: "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
-  },
+  ok: { icon: <Check width={13} height={13} />, label: "Coincide", tone: "ok" },
+  mismatch: { icon: <X width={13} height={13} />, label: "No coincide", tone: "danger" },
+  warn: { icon: <Alert width={13} height={13} />, label: "Difiere", tone: "warn" },
+  expired: { icon: <Ban width={13} height={13} />, label: "Vencido", tone: "danger" },
+  missing: { icon: <Help width={13} height={13} />, label: "Falta / no legible", tone: "neutral" },
 };
+
+/** Origen abierto en el visor de evidencia (solo avaluo). */
+interface EvidenceState {
+  file: File;
+  fieldLabel: string;
+  box?: [number, number, number, number];
+  page?: number;
+}
 
 export default function ReportView({
   report,
   documents,
+  files,
 }: {
   report: Report;
   documents: ExtractedDocument[];
+  files: Partial<Record<DocType, File>>;
 }) {
   const conforme = report.veredicto === "conforme";
+  const [evidence, setEvidence] = useState<EvidenceState | null>(null);
   const fecha = new Date(report.generatedAt).toLocaleString("es-CL");
+
+  const counts = report.results.reduce(
+    (acc, r) => {
+      if (r.status === "ok") acc.ok++;
+      else acc.obs++;
+      return acc;
+    },
+    { ok: 0, obs: 0 },
+  );
 
   return (
     <div className="print-area space-y-6">
       {/* Veredicto general */}
-      <div
-        className={`rounded-2xl border p-5 ${
-          conforme
-            ? "border-emerald-300 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/40"
-            : "border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40"
-        }`}
+      <Card
+        className={cn(
+          "overflow-hidden border-l-4 p-5",
+          conforme ? "border-l-ok" : "border-l-warn",
+        )}
       >
-        <div className="flex items-center gap-3">
-          <span className="text-3xl">{conforme ? "✅" : "⚠️"}</span>
-          <div>
-            <h2 className="text-lg font-bold">
-              {conforme ? "Todo conforme" : "Hay observaciones"}
-            </h2>
-            <p className="text-sm text-zinc-600 dark:text-zinc-300">
-              Solicitante:{" "}
-              <strong>{report.tipo === "sociedad" ? "Sociedad jurídica" : "Persona natural"}</strong>
-              {" · "}Generado: {fecha}
-            </p>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span
+              className={cn(
+                "flex h-11 w-11 items-center justify-center rounded-xl",
+                conforme ? "bg-ok-soft text-ok" : "bg-warn-soft text-warn",
+              )}
+            >
+              {conforme ? <ShieldCheck width={24} height={24} /> : <Alert width={24} height={24} />}
+            </span>
+            <div>
+              <h2 className="text-lg font-bold tracking-tight">
+                {conforme ? "Todo conforme" : "Hay observaciones"}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {report.tipo === "sociedad" ? "Sociedad jurídica" : "Persona natural"}
+                {" · "}
+                <span className="tabular">{fecha}</span>
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Badge tone="ok">{counts.ok} conformes</Badge>
+            {counts.obs > 0 && <Badge tone="warn">{counts.obs} observaciones</Badge>}
           </div>
         </div>
-      </div>
+      </Card>
 
       {/* Resultados regla por regla */}
       <section>
-        <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Verificación campo por campo
-        </h3>
-        <div className="space-y-3">
+        <SectionLabel>Verificación campo por campo</SectionLabel>
+        <div className="space-y-2.5">
           {report.results.map((r) => {
             const meta = STATUS_META[r.status];
             return (
-              <div
-                key={r.id}
-                className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-medium">
-                    <span className="text-zinc-400">#{r.id}</span> {r.label}
-                  </p>
-                  <span
-                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${meta.chip}`}
-                  >
-                    {meta.icon} {meta.label}
-                  </span>
+              <Card key={r.id} className="p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    <span className="mt-0.5 font-mono text-xs text-muted-foreground tabular">
+                      {String(r.id).padStart(2, "0")}
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold">{r.label}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{r.detail}</p>
+                    </div>
+                  </div>
+                  <Badge tone={meta.tone}>
+                    {meta.icon}
+                    {meta.label}
+                  </Badge>
                 </div>
-                <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{r.detail}</p>
+
                 {r.sources.length > 0 && (
-                  <dl className="mt-3 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
+                  <dl className="mt-3 grid gap-x-6 gap-y-1.5 border-t border-border pt-3 text-xs sm:grid-cols-2">
                     {r.sources.map((s, i) => (
-                      <div key={i} className="flex gap-2">
-                        <dt className="shrink-0 text-zinc-500">{s.source}:</dt>
-                        <dd className={s.value ? "" : "italic text-zinc-400"}>
+                      <div key={i} className="flex items-baseline justify-between gap-3">
+                        <dt className="shrink-0 text-muted-foreground">{s.source}</dt>
+                        <dd
+                          className={cn(
+                            "min-w-0 truncate text-right font-mono tabular",
+                            s.value ? "" : "italic text-muted-foreground/60",
+                          )}
+                          title={s.value ?? undefined}
+                        >
                           {s.value ?? "—"}
                         </dd>
                       </div>
                     ))}
                   </dl>
                 )}
-              </div>
+              </Card>
             );
           })}
         </div>
@@ -114,36 +138,93 @@ export default function ReportView({
 
       {/* Datos extraídos por documento */}
       <section>
-        <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          Datos extraídos por documento
-        </h3>
-        <div className="space-y-3">
-          {documents.map((doc) => (
-            <details
-              key={doc.docType}
-              className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
-            >
-              <summary className="cursor-pointer text-sm font-medium">
-                {DOC_LABELS[doc.docType]}
-                {doc.error && <span className="ml-2 text-xs text-red-600">⚠ {doc.error}</span>}
-              </summary>
-              <dl className="mt-3 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
-                {DOC_SPECS[doc.docType].fields.map((f) => {
-                  const fv = doc.fields[f.key];
-                  return (
-                    <div key={f.key} className="flex gap-2">
-                      <dt className="shrink-0 text-zinc-500">{f.key}:</dt>
-                      <dd className={fv?.legible ? "" : "italic text-zinc-400"}>
-                        {fv?.legible ? fv.value : "no legible"}
-                      </dd>
-                    </div>
-                  );
-                })}
-              </dl>
-            </details>
-          ))}
+        <SectionLabel>Datos extraídos por documento</SectionLabel>
+        <div className="space-y-2.5">
+          {documents.map((doc) => {
+            // Solo el avaluo muestra el botón "ver origen", y solo si su archivo
+            // original sigue en memoria. El resto de documentos no cambia.
+            const avaluoFile =
+              doc.docType === "avaluo" ? files.avaluo : undefined;
+            return (
+              <Card key={doc.docType} className="overflow-hidden">
+                <details className="group">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-4 text-sm font-medium [&::-webkit-details-marker]:hidden">
+                    <span className="flex items-center gap-2">
+                      {DOC_LABELS[doc.docType]}
+                      {doc.error && (
+                        <span className="text-xs font-normal text-danger">· {doc.error}</span>
+                      )}
+                    </span>
+                    <ChevronDown
+                      width={16}
+                      height={16}
+                      className="shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+                    />
+                  </summary>
+                  <dl className="grid gap-x-6 gap-y-1.5 border-t border-border p-4 text-xs sm:grid-cols-2">
+                    {DOC_SPECS[doc.docType].fields.map((f) => {
+                      const fv = doc.fields[f.key];
+                      const canLocate = !!avaluoFile && !!fv?.legible;
+                      return (
+                        <div key={f.key} className="flex items-baseline justify-between gap-3">
+                          <dt className="shrink-0 text-muted-foreground">{f.key}</dt>
+                          <dd className="flex min-w-0 items-baseline justify-end gap-1.5">
+                            {canLocate && avaluoFile && (
+                              <button
+                                type="button"
+                                aria-label={`Ver origen de ${f.key}`}
+                                title="Ver origen en el documento"
+                                onClick={() =>
+                                  setEvidence({
+                                    file: avaluoFile,
+                                    fieldLabel: f.key,
+                                    box: fv?.box,
+                                    page: fv?.page,
+                                  })
+                                }
+                                className="no-print flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-primary-soft hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              >
+                                <Target width={13} height={13} />
+                              </button>
+                            )}
+                            <span
+                              className={cn(
+                                "min-w-0 truncate text-right font-mono tabular",
+                                fv?.legible ? "" : "italic text-muted-foreground/60",
+                              )}
+                              title={fv?.legible ? fv.value ?? undefined : "no legible"}
+                            >
+                              {fv?.legible ? fv.value : "no legible"}
+                            </span>
+                          </dd>
+                        </div>
+                      );
+                    })}
+                  </dl>
+                </details>
+              </Card>
+            );
+          })}
         </div>
       </section>
+
+      {evidence && (
+        <EvidenceViewer
+          file={evidence.file}
+          box={evidence.box}
+          page={evidence.page}
+          fieldLabel={evidence.fieldLabel}
+          onClose={() => setEvidence(null)}
+        />
+      )}
     </div>
+  );
+}
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      {children}
+    </h3>
   );
 }

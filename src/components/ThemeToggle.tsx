@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Moon, Sun } from "./icons";
 
 export default function ThemeToggle() {
   const [mounted, setMounted] = useState(false);
@@ -22,7 +23,7 @@ export default function ThemeToggle() {
     }
   }
 
-  // Evita mismatch de hidratación: no renderizamos el icono hasta montar.
+  // Evita mismatch de hidratación: reserva el espacio hasta montar.
   if (!mounted) {
     return <div className="h-9 w-9" aria-hidden />;
   }
@@ -32,9 +33,9 @@ export default function ThemeToggle() {
       type="button"
       onClick={toggle}
       aria-label={dark ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
-      className="no-print flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-lg transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+      className="no-print flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
     >
-      {dark ? "☀️" : "🌙"}
+      {dark ? <Sun width={18} height={18} /> : <Moon width={18} height={18} />}
     </button>
   );
 }

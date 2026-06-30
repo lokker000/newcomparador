@@ -39,9 +39,11 @@ function cedulaRun(docs: DocMap): string | null {
 }
 
 function cedulaVencimiento(docs: DocMap): string | null {
+  // En la cédula chilena vigente el vencimiento está en el FRENTE; el reverso
+  // queda como respaldo (formato antiguo).
   return (
-    field(docs, "cedula_reverso", "fecha_vencimiento") ??
-    field(docs, "cedula_frente", "fecha_vencimiento")
+    field(docs, "cedula_frente", "fecha_vencimiento") ??
+    field(docs, "cedula_reverso", "fecha_vencimiento")
   );
 }
 
@@ -87,7 +89,7 @@ function ruleIdentidad(docs: DocMap): RuleResult {
     { source: "Formulario", field: "nombre_solicitante", value: field(docs, "formulario", "nombre_solicitante") },
     { source: "Cédula", field: "nombre", value: cedulaNombre(docs) },
     { source: "Avalúo (propietario)", field: "propietario", value: field(docs, "avaluo", "propietario") },
-    { source: "CBR (propietario)", field: "propietario", value: field(docs, "cbr", "propietario") },
+    { source: "Dominio vigente (propietario)", field: "propietario", value: field(docs, "cbr", "propietario") },
   ];
   const runSources: SourceValue[] = [
     { source: "Formulario", field: "run_solicitante", value: field(docs, "formulario", "run_solicitante") },
@@ -107,7 +109,7 @@ function ruleIdentidad(docs: DocMap): RuleResult {
   };
 }
 
-// ── Regla 5: Propietario vigente (CBR) = solicitante ───────────────
+// ── Regla 5: Propietario del dominio vigente = solicitante ───────────────
 function rulePropietarioVigente(docs: DocMap): RuleResult {
   const cbr = field(docs, "cbr", "propietario");
   const solicitante =
@@ -116,16 +118,16 @@ function rulePropietarioVigente(docs: DocMap): RuleResult {
     cedulaNombre(docs);
 
   const sources: SourceValue[] = [
-    { source: "CBR (propietario vigente)", field: "propietario", value: cbr },
+    { source: "Dominio vigente (propietario vigente)", field: "propietario", value: cbr },
     { source: "Solicitante", field: "nombre/razón social", value: solicitante },
   ];
 
   if (!cbr || !solicitante) {
     return {
       id: 5,
-      label: "Propietario vigente (CBR) = solicitante",
+      label: "Propietario del dominio vigente = solicitante",
       status: "missing",
-      detail: "Falta el propietario del CBR o el solicitante.",
+      detail: "Falta el propietario del Dominio vigente o el solicitante.",
       sources,
     };
   }
@@ -133,11 +135,11 @@ function rulePropietarioVigente(docs: DocMap): RuleResult {
   const ok = nameMatches(cbr, solicitante) || companyEquals(cbr, solicitante);
   return {
     id: 5,
-    label: "Propietario vigente (CBR) = solicitante",
+    label: "Propietario del dominio vigente = solicitante",
     status: ok ? "ok" : "mismatch",
     detail: ok
       ? "El propietario vigente coincide con el solicitante."
-      : "El propietario vigente en el CBR NO coincide con el solicitante.",
+      : "El propietario vigente en el Dominio vigente NO coincide con el solicitante.",
     sources,
   };
 }
@@ -211,7 +213,7 @@ function ruleRepresentante(docs: DocMap): RuleResult {
   const sources: SourceValue[] = [
     { source: "Formulario", field: "representante_legal", value: field(docs, "formulario", "representante_legal") },
     { source: "e-RUT", field: "representante_legal", value: field(docs, "erut", "representante_legal") },
-    { source: "CBR", field: "representante_legal", value: field(docs, "cbr", "representante_legal") },
+    { source: "Dominio vigente", field: "representante_legal", value: field(docs, "cbr", "representante_legal") },
   ];
   return {
     ...evalEquality(8, "Sociedad: representante legal", sources, nameMatches),
@@ -275,7 +277,7 @@ const RULES: RuleDef[] = [
         [
           { source: "Formulario", field: "rol_predio", value: field(docs, "formulario", "rol_predio") },
           { source: "Avalúo", field: "rol_predio", value: field(docs, "avaluo", "rol_predio") },
-          { source: "CBR", field: "rol_predio", value: field(docs, "cbr", "rol_predio") },
+          { source: "Dominio vigente", field: "rol_predio", value: field(docs, "cbr", "rol_predio") },
         ],
         rolEquals,
       ),
@@ -293,7 +295,7 @@ const RULES: RuleDef[] = [
         [
           { source: "Formulario", field: "comuna", value: field(docs, "formulario", "comuna") },
           { source: "Avalúo", field: "comuna", value: field(docs, "avaluo", "comuna") },
-          { source: "CBR", field: "comuna", value: field(docs, "cbr", "comuna") },
+          { source: "Dominio vigente", field: "comuna", value: field(docs, "cbr", "comuna") },
         ],
         textEquals,
       ),
@@ -309,7 +311,7 @@ function ruleSuperficie(docs: DocMap): RuleResult {
   const sources: SourceValue[] = [
     { source: "Formulario", field: "superficie", value: field(docs, "formulario", "superficie") },
     { source: "Avalúo", field: "superficie", value: field(docs, "avaluo", "superficie") },
-    { source: "CBR", field: "superficie", value: field(docs, "cbr", "superficie") },
+    { source: "Dominio vigente", field: "superficie", value: field(docs, "cbr", "superficie") },
   ];
   const status = compareSuperficie(sources.map((s) => s.value));
   const detail: Record<RuleStatus, string> = {

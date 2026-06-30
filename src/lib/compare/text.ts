@@ -56,10 +56,18 @@ export function companyEquals(
   return na !== "" && na === nb;
 }
 
-/** Normaliza un rol de avalúo (deja solo alfanumérico, sin ceros a la izquierda). */
+/**
+ * Normaliza un rol de avalúo. El rol viene en segmentos (p. ej. "00043-0183")
+ * y a veces con ceros a la izquierda en CADA segmento. Se quitan esos ceros
+ * por segmento, no del string entero, para que "00043-0183" == "43-183".
+ * normalizeText ya pasó los separadores (-, /, etc.) a espacios.
+ */
 export function normalizeRol(s: string | null | undefined): string {
-  const cleaned = normalizeText(s).replace(/[^0-9A-Z]/g, "");
-  return cleaned.replace(/^0+/, "");
+  return normalizeText(s)
+    .split(" ")
+    .map((seg) => seg.replace(/[^0-9A-Z]/g, "").replace(/^0+(?=.)/, "")) // ceros izq, deja ≥1 char
+    .filter(Boolean)
+    .join("-");
 }
 
 export function rolEquals(
