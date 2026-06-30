@@ -79,6 +79,41 @@ export function rolEquals(
   return na !== "" && na === nb;
 }
 
+/**
+ * Igualdad numérica por dígitos: ignora puntos, espacios y demás separadores.
+ * "1.200" == "1200", "N° 1064" == "1064". Para fojas/número/año de inscripción.
+ */
+export function digitsEquals(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  const da = (a ?? "").replace(/\D/g, "");
+  const db = (b ?? "").replace(/\D/g, "");
+  return da !== "" && da === db;
+}
+
+/**
+ * Normaliza un texto de deslinde para comparar.
+ * Aplica normalizeText y luego elimina un token cardinal INICIAL si lo hay,
+ * ya que el CBR suele anteponer la orientación ("NORTE, en…") mientras el
+ * formulario la omite ("En sesenta y cuatro metros…").
+ *
+ * Después de normalizeText el texto ya está en mayúsculas sin tildes y la
+ * puntuación (coma, guion, etc.) ya es un espacio, así que el patrón a
+ * eliminar es: opcional "AL " + cardinal + separadores opcionales (espacios).
+ *
+ * Solo se elimina si el string COMIENZA con ese patrón (no a mitad del texto).
+ */
+export function normalizeDeslinde(s: string | null | undefined): string {
+  const base = normalizeText(s);
+  if (!base) return "";
+  // Tras normalizeText: todo mayúsculas, sin tildes, puntuación→espacio, espacios colapsados.
+  // Un token cardinal al inicio luce así: "NORTE " o "AL NORTE " (con espacio o al final de str).
+  const CARDINAL_PREFIX =
+    /^(?:AL\s+)?(?:NORTE|SUR|ORIENTE|ESTE|PONIENTE|OESTE)\s*/;
+  return base.replace(CARDINAL_PREFIX, "").trim();
+}
+
 /** Tokens significativos de un nombre (descarta palabras de 1 letra). */
 export function nameTokens(s: string | null | undefined): string[] {
   return normalizeText(s)

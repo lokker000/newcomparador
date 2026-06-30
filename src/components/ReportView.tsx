@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import type { DocType, ExtractedDocument, Report, RuleStatus } from "@/lib/types";
+import type { DocType, ExtractedDocument, Report, RuleResult, RuleStatus, SourceValue } from "@/lib/types";
 import { DOC_LABELS } from "@/lib/documents";
 import { DOC_SPECS } from "@/lib/extraction/schemas";
 import { Badge, Card, cn } from "./ui";
@@ -112,24 +112,10 @@ export default function ReportView({
                   </Badge>
                 </div>
 
-                {r.sources.length > 0 && (
-                  <dl className="mt-3 grid gap-x-6 gap-y-1.5 border-t border-border pt-3 text-xs sm:grid-cols-2">
-                    {r.sources.map((s, i) => (
-                      <div key={i} className="flex items-baseline justify-between gap-3">
-                        <dt className="shrink-0 text-muted-foreground">{s.source}</dt>
-                        <dd
-                          className={cn(
-                            "min-w-0 truncate text-right font-mono tabular",
-                            s.value ? "" : "italic text-muted-foreground/60",
-                          )}
-                          title={s.value ?? undefined}
-                        >
-                          {s.value ?? "—"}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                )}
+                {/* Sources renderer — rule 10 (deslindes) uses a full-text
+                    stacked layout; all other rules use the compact truncated
+                    2-column layout. See RuleSources / DeslindesSourceList. */}
+                <RuleSources r={r} />
               </Card>
             );
           })}
@@ -226,5 +212,99 @@ function SectionLabel({ children }: { children: ReactNode }) {
     <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
       {children}
     </h3>
+  );
+}
+
+// ── Special layout for rule 10 (Deslindes del predio) ────────────────────────
+// Sources come in pairs: "Formulario (Norte)" / "Dominio vigente (Norte)" for
+// each of the four cardinals. We group them into a 2-column table so the user
+// can read and compare the full text side-by-side without truncation.
+const CARDINALS = ["Norte", "Sur", "Oriente", "Poniente"] as const;
+
+function DeslindesSourceList({ sources }: { sources: SourceValue[] }) {
+  // Build a map: cardinal → { formulario, cbr }
+  type Pair = { formulario: string | null; cbr: string | null };
+  const pairs: Record<string, Pair> = {};
+  for (const cardinal of CARDINALS) {
+    pairs[cardinal] = { formulario: null, cbr: null };
+  }
+  for (const s of sources) {
+    for (const cardinal of CARDINALS) {
+      if (s.source === `Formulario (${cardinal})`) {
+        pairs[cardinal].formulario = s.value;
+      } else if (s.source === `Dominio vigente (${cardinal})`) {
+        pairs[cardinal].cbr = s.value;
+      }
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-3 border-t border-border pt-3 text-xs">
+      {CARDINALS.map((cardinal) => {
+        const { formulario, cbr } = pairs[cardinal];
+        return (
+          <div key={cardinal} className="grid gap-2 sm:grid-cols-2">
+            {/* Formulario column */}
+            <div>
+              <p className="mb-0.5 font-semibold text-muted-foreground">
+                Formulario ({cardinal})
+              </p>
+              <p
+                className={cn(
+                  "whitespace-normal break-words font-mono",
+                  formulario ? "" : "italic text-muted-foreground/60",
+                )}
+              >
+                {formulario ?? "—"}
+              </p>
+            </div>
+            {/* Dominio vigente column */}
+            <div>
+              <p className="mb-0.5 font-semibold text-muted-foreground">
+                Dominio vigente ({cardinal})
+              </p>
+              <p
+                className={cn(
+                  "whitespace-normal break-words font-mono",
+                  cbr ? "" : "italic text-muted-foreground/60",
+                )}
+              >
+                {cbr ?? "—"}
+              </p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Selects the right sources renderer depending on the rule. */
+function RuleSources({ r }: { r: RuleResult }) {
+  if (r.sources.length === 0) return null;
+
+  // Special case: deslindes rule (id 10) needs full, unwrapped text.
+  if (r.id === 10) {
+    return <DeslindesSourceList sources={r.sources} />;
+  }
+
+  // Default: compact 2-column truncated layout for all other rules.
+  return (
+    <dl className="mt-3 grid gap-x-6 gap-y-1.5 border-t border-border pt-3 text-xs sm:grid-cols-2">
+      {r.sources.map((s, i) => (
+        <div key={i} className="flex items-baseline justify-between gap-3">
+          <dt className="shrink-0 text-muted-foreground">{s.source}</dt>
+          <dd
+            className={cn(
+              "min-w-0 truncate text-right font-mono tabular",
+              s.value ? "" : "italic text-muted-foreground/60",
+            )}
+            title={s.value ?? undefined}
+          >
+            {s.value ?? "—"}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }

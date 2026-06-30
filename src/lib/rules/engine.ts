@@ -7,7 +7,7 @@ import type {
   SourceValue,
   TipoSolicitante,
 } from "../types";
-import { companyEquals, nameMatches, rolEquals, textEquals } from "../compare/text";
+import { companyEquals, digitsEquals, nameMatches, normalizeDeslinde, normalizeText, rolEquals, textEquals } from "../compare/text";
 import { rutEquals } from "../compare/rut";
 import { compareSuperficie } from "../compare/superficie";
 import { isVigente, parseDate } from "../compare/dates";
@@ -221,6 +221,88 @@ function ruleRepresentante(docs: DocMap): RuleResult {
   };
 }
 
+// ── Regla 9: Inscripción en el dominio vigente (formulario sección 3) ──
+// Fojas / Número / Año / Conservador del formulario deben coincidir con el
+// dominio vigente adjuntado (de donde se copian esos datos).
+function ruleInscripcion(docs: DocMap): RuleResult {
+  const fojas: SourceValue[] = [
+    { source: "Formulario", field: "fojas", value: field(docs, "formulario", "fojas") },
+    { source: "Dominio vigente", field: "fojas", value: field(docs, "cbr", "fojas") },
+  ];
+  const numero: SourceValue[] = [
+    { source: "Formulario", field: "numero_inscripcion", value: field(docs, "formulario", "numero_inscripcion") },
+    { source: "Dominio vigente", field: "numero_inscripcion", value: field(docs, "cbr", "numero_inscripcion") },
+  ];
+  const anio: SourceValue[] = [
+    { source: "Formulario", field: "anio_inscripcion", value: field(docs, "formulario", "anio_inscripcion") },
+    { source: "Dominio vigente", field: "anio_inscripcion", value: field(docs, "cbr", "anio_inscripcion") },
+  ];
+  const conservador: SourceValue[] = [
+    { source: "Formulario", field: "conservador", value: field(docs, "formulario", "conservador") },
+    { source: "Dominio vigente", field: "conservador", value: field(docs, "cbr", "conservador") },
+  ];
+
+  const fSt = statusOf(fojas, digitsEquals);
+  const nSt = statusOf(numero, digitsEquals);
+  const aSt = statusOf(anio, digitsEquals);
+  const cSt = statusOf(conservador, textEquals);
+
+  return {
+    id: 9,
+    label: "Inscripción en el dominio vigente (fojas, número, año)",
+    status: worst([fSt, nSt, aSt, cSt]),
+    detail:
+      detailFor("Fojas", fSt) + " " + detailFor("Número", nSt) + " " +
+      detailFor("Año", aSt) + " " + detailFor("Conservador", cSt),
+    sources: [...fojas, ...numero, ...anio, ...conservador],
+  };
+}
+
+// ── Regla 10: Deslindes (formulario sección 4) = dominio vigente ──
+// Texto descriptivo: si difiere, se marca "difiere/revisar" (warn) en vez de
+// "no coincide" duro, porque pequeñas variaciones de transcripción son normales.
+function ruleDeslindes(docs: DocMap): RuleResult {
+  const cardinales: [string, string][] = [
+    ["Norte", "deslinde_norte"],
+    ["Sur", "deslinde_sur"],
+    ["Oriente", "deslinde_oriente"],
+    ["Poniente", "deslinde_poniente"],
+  ];
+
+  const sources: SourceValue[] = [];
+  const estados: RuleStatus[] = [];
+  const difieren: string[] = [];
+
+  for (const [nombre, key] of cardinales) {
+    const f = field(docs, "formulario", key);
+    const c = field(docs, "cbr", key);
+    sources.push({ source: `Formulario (${nombre})`, field: key, value: f });
+    sources.push({ source: `Dominio vigente (${nombre})`, field: key, value: c });
+
+    if (!f || !c) {
+      estados.push("missing");
+    } else if (normalizeDeslinde(f) === normalizeDeslinde(c)) {
+      // normalizeDeslinde strips a leading cardinal token (e.g. "NORTE, ")
+      // so "NORTE, en sesenta metros…" matches "En sesenta metros…".
+      // Sources keep the original untrimmed values for display.
+      estados.push("ok");
+    } else {
+      estados.push("warn");
+      difieren.push(nombre);
+    }
+  }
+
+  const status = worst(estados);
+  const detail =
+    status === "ok"
+      ? "Los cuatro deslindes coinciden con el dominio vigente."
+      : difieren.length > 0
+        ? `Revisar deslindes que difieren: ${difieren.join(", ")}.`
+        : "Datos de deslindes insuficientes para comparar.";
+
+  return { id: 10, label: "Deslindes del predio", status, detail, sources };
+}
+
 // ───────────────────────────────────────────────────────────────
 // Helpers de estado
 // ───────────────────────────────────────────────────────────────
@@ -302,6 +384,8 @@ const RULES: RuleDef[] = [
   },
   { appliesTo: () => true, run: rulePropietarioVigente },
   { appliesTo: () => true, run: ruleCedulaVigente },
+  { appliesTo: () => true, run: ruleInscripcion },
+  { appliesTo: () => true, run: ruleDeslindes },
   { appliesTo: (t) => t === "sociedad", run: ruleSociedadDatos },
   { appliesTo: (t) => t === "sociedad", run: ruleRepresentante },
 ];
